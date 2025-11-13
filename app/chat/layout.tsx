@@ -1,0 +1,17 @@
+import "../globals.css";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Context Memory Layer",
+  description: "The AI-powered context memory system for chatbots and developers.",
+};
+
+export default function ChatLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <main className="flex-1">{children}</main>
+  );
+}
