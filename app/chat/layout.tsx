@@ -1,5 +1,6 @@
 import "../globals.css";
 import type { Metadata } from "next";
+import { Header } from "@/components/sections/header";
 
 export const metadata: Metadata = {
   title: "Context Memory Layer",
@@ -12,6 +13,9 @@ export default function ChatLayout({
   children: React.ReactNode;
 }) {
   return (
-    <main className="flex-1">{children}</main>
+    <>
+      <Header />
+      <main className="flex-1">{children}</main>
+    </>
   );
 }
