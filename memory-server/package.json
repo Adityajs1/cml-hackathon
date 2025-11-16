@@ -1,0 +1,19 @@
+{
+  "name": "memory-server",
+  "version": "1.0.0",
+  "description": "Standalone memory server for Neuron",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@chroma-core/default-embed": "^0.1.9",
+    "@google/generative-ai": "latest",
+    "chromadb": "latest",
+    "cors": "latest",
+    "dotenv": "latest",
+    "express": "latest",
+    "uuid": "latest"
+  }
+}

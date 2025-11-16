@@ -36,7 +36,7 @@ export default function Home() {
           />
           <Feature
             title="Easy Integration"
-            desc="Add memory to any chatbot API with minimal setup using Next.js and ChromaDB."
+            desc="Add memory to any chatbot API with minimal setup using Next.js."
           />
         </div>
       </section>

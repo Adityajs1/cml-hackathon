@@ -14,7 +14,6 @@ export default function ChatLayout({
 }) {
   return (
     <>
-      <Header />
       <main className="flex-1">{children}</main>
     </>
   );
