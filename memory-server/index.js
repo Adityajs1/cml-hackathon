@@ -31,6 +31,63 @@ const chroma = new CloudClient({
 // =======================================================
 // 🧠 ROUTE 1: FETCH ALL MEMORIES (for dashboard)
 // =======================================================
+// GET /memories/heatmap?userId=<>&sessionId=<>&weeks=12
+app.get("/memories/heatmap", async (req, res) => {
+  try {
+    const userId = req.query.userId || "32dac220-1244-4335-95c2-86a4da97d1ff";
+    const sessionId = req.query.sessionId || "default-session";
+    const weeks = parseInt(req.query.weeks || "12", 10);
+
+    const collection = await chroma.getOrCreateCollection({
+      name: `memory_${userId}_${sessionId}`
+    });
+
+    // get all records (IDs, docs, metadatas)
+    const results = await collection.get();
+
+    const metadatas = results.metadatas || [];
+
+    // collect timestamps into dates (UTC) -> counts
+    const counts = {}; // { "2025-11-01": 3, ... }
+
+    metadatas.forEach((meta) => {
+      if (!meta) return;
+      // expect meta.ts (ms)
+      const ts = meta.ts || meta?.timestamp || meta?.time;
+      if (!ts) return;
+      const d = new Date(Number(ts));
+      if (isNaN(d.getTime())) return;
+      // convert to YYYY-MM-DD in UTC
+      const yyyy = d.getUTCFullYear();
+      const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const dd = String(d.getUTCDate()).padStart(2, "0");
+      const key = `${yyyy}-${mm}-${dd}`;
+      counts[key] = (counts[key] || 0) + 1;
+    });
+
+    // build list of dates covering `weeks` weeks up to today (inclusive)
+    const days = weeks * 7;
+    const today = new Date();
+    // use UTC midnight for all dates to avoid timezone inconsistencies
+    const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    const output = [];
+
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(todayUTC);
+      d.setUTCDate(d.getUTCDate() - i);
+      const yyyy = d.getUTCFullYear();
+      const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const dd = String(d.getUTCDate()).padStart(2, "0");
+      const key = `${yyyy}-${mm}-${dd}`;
+      output.push({ date: key, count: counts[key] || 0 });
+    }
+
+    res.json({ weeks, data: output }); // data: array ordered oldest -> newest
+  } catch (err) {
+    console.error("Heatmap error:", err);
+    res.status(500).json({ error: "Failed to compute heatmap" });
+  }
+});
 app.get("/memories", async (req, res) => {
   try {
     const userId =
@@ -288,8 +345,58 @@ app.post("/memory/context", async (req, res) => {
 });
 
 // =======================================================
+// 🔍 ROUTE 6b: SEMANTIC MEMORY SEARCH (Keyword + Vector)
+// =======================================================
+app.post("/memory/search", async (req, res) => {
+  try {
+    const {
+      userId,
+      sessionId = "default-session",
+      text,
+      topK = 8,
+    } = req.body;
+
+    if (!userId || !text) {
+      return res.status(400).json({ error: "Missing userId or text" });
+    }
+
+    const collection = await chroma.getOrCreateCollection({
+      name: `memory_${userId}_${sessionId}`,
+    });
+
+    // -------- 1) Embed query --------
+    const embedModel = genAI.getGenerativeModel({
+      model: "text-embedding-004",
+    });
+
+    const embedded = await embedModel.embedContent(text);
+    const queryVec = embedded.embedding.values;
+
+    // -------- 2) Query vector DB --------
+    const result = await collection.query({
+      queryEmbeddings: [queryVec],
+      nResults: topK,
+    });
+
+    const matches = (result.documents?.[0] || []).map((doc, i) => ({
+      id: result.ids?.[0]?.[i],
+      document: doc,
+      metadata: result.metadatas?.[0]?.[i],
+      distance: result.distances?.[0]?.[i],
+    }));
+
+    res.json({ ok: true, results: matches });
+  } catch (err) {
+    console.error("Semantic Search Error:", err);
+    res.status(500).json({ error: "Semantic search failed" });
+  }
+});
+
+
+// =======================================================
 // ✍️ ROUTE 7: REWRITE A SUMMARY
 // =======================================================
+
 app.post("/memory/rewrite", async (req, res) => {
   try {
     const {
