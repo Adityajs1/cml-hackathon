@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 import { embedText } from "@/lib/embedding";
 import { chroma } from "@/lib/chroma";
 import { rankMemories } from "@/lib/ranking";
@@ -7,7 +7,7 @@ import { generateText } from "@/lib/gemini";
 import { autoStoreMemoryIfNeeded } from "@/lib/autoMemoryExtraction";
 
 export async function POST(req: Request) {
-  const supabase = createClient();
+
   const { message, user_id } = await req.json();
 
   if (!message || !user_id) {

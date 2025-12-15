@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 import { chroma } from "@/lib/chroma";
 import { embedText } from "@/lib/embedding";
 
 export async function PATCH(req: Request, { params }: any) {
-  const supabase = createClient();
+
   const id = params.id;
   const body = await req.json();
 
@@ -64,7 +64,7 @@ export async function PATCH(req: Request, { params }: any) {
 }
 
 export async function DELETE(req: Request, { params }: any) {
-  const supabase = createClient();
+
   const id = params.id;
 
   // 1️⃣ Delete from Supabase

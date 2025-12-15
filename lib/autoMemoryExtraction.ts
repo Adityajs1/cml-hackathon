@@ -1,5 +1,5 @@
 // lib/autoMemoryExtraction.ts
-import { createClient } from "@/lib/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 import { chroma } from "@/lib/chroma";
 import { embedText } from "@/lib/embedding";
 import { classifyImportance } from "@/lib/memoryClassifier";
@@ -48,7 +48,7 @@ export async function autoStoreMemoryIfNeeded(opts: {
   // otherwise store
   const embedding = await embedText(text);
 
-  const supabase = createClient();
+
 
   // insert into supabase
   const { data: memoryRow, error } = await supabase

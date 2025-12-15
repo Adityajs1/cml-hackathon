@@ -28,6 +28,13 @@ const chroma = new CloudClient({
   database: process.env.CHROMA_DATABASE,
 });
 
+async function getProfileCollection(userId) {
+  return await chroma.getOrCreateCollection({
+    name: `memory_${userId}_profile`,
+    metadata: { type: "profile" }
+  });
+}
+
 // =======================================================
 // 🧠 ROUTE 1: FETCH ALL MEMORIES (for dashboard)
 // =======================================================
@@ -118,7 +125,7 @@ app.get("/memories", async (req, res) => {
 // =======================================================
 app.post("/chat", async (req, res) => {
   try {
-    const { userId, message, sessionId, memoryEnabled = true } = req.body;
+    const { userId, message, sessionId, sessionTitle, memoryEnabled = true } = req.body;
 
     if (!userId || !message) {
       return res
@@ -141,7 +148,7 @@ app.post("/chat", async (req, res) => {
     // Create or get collection
     const collection = await chroma.getOrCreateCollection({
       name: `memory_${userId}_${activeSession}`,
-      metadata: { version: "v6", sessionId: activeSession },
+      metadata: { version: "v6", sessionId: activeSession, title: sessionTitle || `Chat with ${userId}` },
     });
 
     // 1️⃣ Embed User Message
@@ -149,33 +156,47 @@ app.post("/chat", async (req, res) => {
     const embedRes = await embedModel.embedContent(message);
     const userVector = embedRes.embedding.values;
 
-    // 2️⃣ Retrieve all existing messages
-    const all = await collection.get();
-    const docs = all.documents || [];
-    const metas = all.metadatas || [];
+    // 2️⃣ Retrieve session memory
+    const sessionAll = await collection.get();
+
+    const sessionDocs = sessionAll.documents || [];
+    const sessionMetas = sessionAll.metadatas || [];
+
+    // 3️⃣ Retrieve global profile memory
+    const profileCollection = await getProfileCollection(userId);
+    const profileAll = await profileCollection.get();
+
+    const profileDocs = profileAll.documents || [];
+    const profileMetas = profileAll.metadatas || [];
 
     // Separate long-term and short-term memories
-    const longTerm = metas
+    const sessionLong = sessionMetas
       .filter((m) => m?.type === "summary")
       .map((m) => m.summaryText)
       .join("\n");
 
-    const shortTerm = docs.slice(-10).join("\n");
+    const shortTerm = sessionDocs.slice(-10).join("\n");
+
+    const profileLong = profileMetas
+      .filter((m) => m?.type === "profile")
+      .map((m) => m.text) // Assuming profile memories store text directly
+      .join("\n");
 
     // 3️⃣ Build Prompt
-    const context = `
+    const prompt = `
+You are Neuron — an AI assistant with layered memory:
+- Permanent user profile
+- Long-term (summarized) memory
+- Short-term (recent chat context)
+
+--- PERMANENT PROFILE MEMORY ---
+${profileLong || "No profile data yet."}
+
 --- LONG TERM MEMORY ---
-${longTerm || "No long-term memory yet."}
+${sessionLong || "No long-term memory yet."}
 
 --- SHORT TERM MEMORY ---
 ${shortTerm || "No recent chat memory."}
-`;
-
-    const prompt = `
-You are Neuron — an AI assistant with layered memory (short-term and long-term).
-Use the long-term memory only when relevant to the user's message.
-
-${context}
 
 User: ${message}
 AI:
@@ -208,8 +229,8 @@ AI:
     });
 
     // 7️⃣ Summarize Older Memory
-    if (docs.length > 20) {
-      const oldChats = docs.slice(0, -10).join("\n");
+    if (sessionDocs.length > 20) {
+      const oldChats = sessionDocs.slice(0, -10).join("\n");
 
       const summarizer = genAI.getGenerativeModel({
         model: "gemini-2.0-flash",
@@ -256,7 +277,7 @@ ${oldChats}
 // =======================================================
 // 🗑️ ROUTE 3: DELETE A SPECIFIC MEMORY ENTRY
 // =======================================================
-app.delete("/memory/:userId/:sessionId/:id", async (req, res) => {
+app.delete("/session/:userId/:sessionId/memory/:id", async (req, res) => {
   try {
     const { userId, sessionId, id } = req.params;
 
@@ -277,14 +298,11 @@ app.delete("/memory/:userId/:sessionId/:id", async (req, res) => {
 // =======================================================
 // 🧹 ROUTE 4: CLEAR ALL MEMORY FOR A SESSION
 // =======================================================
-app.delete("/memories/:userId/:sessionId", async (req, res) => {
+app.delete("/session/:userId/:sessionId", async (req, res) => {
   try {
     const { userId, sessionId } = req.params;
-    const collection = await chroma.getOrCreateCollection({
-      name: `memory_${userId}_${sessionId}`,
-    });
-
-    await collection.delete();
+    const collectionName = `memory_${userId}_${sessionId}`;
+    await chroma.deleteCollection({name: collectionName});
     console.log(`🧹 Cleared all memories for ${userId} (${sessionId})`);
     res.json({ success: true });
   } catch (err) {
@@ -292,6 +310,34 @@ app.delete("/memories/:userId/:sessionId", async (req, res) => {
     res.status(500).json({ error: "Failed to clear memories" });
   }
 });
+
+// =======================================================
+// ✍️ ROUTE 4b: RENAME A SESSION
+// =======================================================
+app.post("/session/rename", async (req, res) => {
+  try {
+    const { userId, sessionId, newTitle } = req.body;
+    if (!userId || !sessionId || !newTitle) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const collectionName = `memory_${userId}_${sessionId}`;
+    const collection = await chroma.getCollection({name: collectionName});
+    
+    // Create a new metadata object with the updated title
+    const newMetadata = { ...(collection.metadata || {}), title: newTitle };
+
+    // Update the collection's metadata
+    await collection.modify({metadata: newMetadata});
+
+    console.log(`✍️ Renamed session for ${userId} from ${sessionId} to ${newTitle}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error renaming session:", err);
+    res.status(500).json({ error: "Failed to rename session" });
+  }
+});
+
 
 // =======================================================
 // 📚 ROUTE 5: LIST SESSIONS FOR A USER
@@ -456,9 +502,36 @@ Rewrite the summary to follow the instruction while preserving all facts.
   }
 });
 
-// =======================================================
-// 🚀 SERVER START
-// =======================================================
+// ======================================
+//  🧠 PROFILE MEMORY - Permanent Storage
+// ======================================
+app.post("/memory/profile", async (req, res) => {
+  try {
+    const { userId, text } = req.body;
+    if (!text) return res.status(400).json({ error: "Missing text" });
+
+    const profileCollection = await getProfileCollection(userId);
+
+    // embed text
+    const embedModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
+    const emb = (await embedModel.embedContent(text)).embedding.values;
+
+    await profileCollection.add({
+      ids: [uuid()],
+      documents: [text],
+      embeddings: [emb],
+      metadatas: [
+        { role: "profile", ts: Date.now(), type: "profile" }
+      ]
+    });
+
+    res.json({ saved: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to save profile memory" });
+  }
+});
+
 app.listen(5050, () => {
   console.log("🚀 Memory Server running at http://localhost:5050");
 });

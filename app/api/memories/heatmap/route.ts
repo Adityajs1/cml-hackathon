@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 import { embedText } from "@/lib/embedding";
 import { chroma } from "@/lib/chroma";
 import { classifyImportance } from "@/lib/memoryClassifier";
 
 export async function POST(req: Request) {
-  const supabase = createClient();
+
   const { text, user_id } = await req.json();
 
   if (!text || !user_id) {

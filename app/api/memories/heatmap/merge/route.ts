@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 import { embedText } from "@/lib/embedding";
 import { chroma } from "@/lib/chroma";
 import { generateText } from "@/lib/gemini";
 
 export async function POST(req: Request) {
-  const supabase = createClient();
+
   const { ids, user_id } = await req.json();
 
   if (!ids || !Array.isArray(ids) || ids.length === 0) {
