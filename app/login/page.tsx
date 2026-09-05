@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { authClient } from "@/lib/authClient";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -20,11 +20,10 @@ export default function LoginPage() {
     setLoading(true);
     setMessage("");
 
-    const { data: _data, error } = await supabase.auth.signInWithPassword({
+    const { error } = await authClient.signIn({
       email,
       password,
     });
-    void _data;
 
     if (error) setMessage(error.message);
     else {

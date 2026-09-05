@@ -1,19 +1,18 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { authClient, AuthUser } from "@/lib/authClient";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { User } from "@supabase/supabase-js";
 
 type Message = { role: "user" | "ai"; content: string };
 type Session = { id: string; title: string; createdAt: number };
 
 export default function ChatPage() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -25,8 +24,8 @@ export default function ChatPage() {
   // ----------- AUTH -----------
   useEffect(() => {
     const getUser = async () => {
-      const { data } = await supabase.auth.getUser();
-      console.log('Supabase user:', data.user);
+      const { data } = await authClient.getUser();
+      console.log('User:', data.user);
       if (!data.user) router.push("/login");
       else setUser(data.user);
     };

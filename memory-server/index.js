@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { CloudClient } from "chromadb";
 import { v4 as uuid } from "uuid";
+import { db, hashPassword } from "./db.js";
 
 dotenv.config();
 
@@ -17,6 +18,76 @@ app.use(
   })
 );
 app.use(express.json());
+
+// =======================================================
+// 🔐 ROUTE 0: EXPRESS LOCAL AUTHENTICATION
+// =======================================================
+app.post("/auth/signup", (req, res) => {
+  try {
+    const { email, password, name } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+    const existing = db.findUserByEmail(email);
+    if (existing) {
+      return res.status(400).json({ error: "An account with this email already exists" });
+    }
+    const user = db.createUser({ email, password, name });
+    const session = db.createSession(user.id);
+    res.json({ ok: true, user, token: session.token });
+  } catch (err) {
+    console.error("Signup error:", err);
+    res.status(500).json({ error: "Signup failed" });
+  }
+});
+
+app.post("/auth/login", (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+    const user = db.findUserByEmail(email);
+    if (!user || user.password_hash !== hashPassword(password)) {
+      return res.status(400).json({ error: "Invalid email or password" });
+    }
+    const session = db.createSession(user.id);
+    const userObj = { id: user.id, email: user.email, name: user.name };
+    res.json({ ok: true, user: userObj, token: session.token });
+  } catch (err) {
+    console.error("Login error:", err);
+    res.status(500).json({ error: "Login failed" });
+  }
+});
+
+app.get("/auth/me", (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader ? authHeader.replace("Bearer ", "") : req.query.token;
+    if (!token) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+    const session = db.getSession(token);
+    if (!session) {
+      return res.status(401).json({ error: "Session expired or invalid" });
+    }
+    res.json({ ok: true, user: session.user });
+  } catch (err) {
+    console.error("Auth me error:", err);
+    res.status(500).json({ error: "Auth verification failed" });
+  }
+});
+
+app.post("/auth/logout", (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader ? authHeader.replace("Bearer ", "") : req.body.token;
+    if (token) db.deleteSession(token);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: "Logout failed" });
+  }
+});
 
 // --------------------
 // Initialize Gemini + Chroma

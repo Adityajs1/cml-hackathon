@@ -1,5 +1,4 @@
-// lib/autoMemoryExtraction.ts
-import { supabase } from "@/lib/supabaseClient";
+import { db } from "../memory-server/db.js";
 import { chroma } from "@/lib/chroma";
 import { embedText } from "@/lib/embedding";
 import { classifyImportance } from "@/lib/memoryClassifier";
@@ -16,7 +15,7 @@ export type ExtractionResult = {
  * Decide whether to store a piece of text as a memory.
  * - Runs LLM classifier
  * - Applies "do_not_store" heuristics (private fields, ephemeral messages)
- * - If store=true, inserts into supabase + chroma and returns the created row
+ * - If store=true, inserts into local DB + chroma and returns the created row
  */
 export async function autoStoreMemoryIfNeeded(opts: {
   text: string;
@@ -25,6 +24,7 @@ export async function autoStoreMemoryIfNeeded(opts: {
   forceStore?: boolean; // bypass heuristics
 }): Promise<ExtractionResult> {
   const { text, user_id, source = "chat", forceStore = false } = opts;
+  void source;
 
   // quick guard: blank or extremely short messages are transient
   if (!text || text.trim().length < 6) {
@@ -48,26 +48,15 @@ export async function autoStoreMemoryIfNeeded(opts: {
   // otherwise store
   const embedding = await embedText(text);
 
-
-
-  // insert into supabase
-  const { data: memoryRow, error } = await supabase
-    .from("memories")
-    .insert({
-      text,
-      user_id,
-      embedding,
-      importance_score: cls.importance_score ?? 0,
-      pinned: false,
-      do_not_store_again: false
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error("autoStore: supabase insert error", error);
-    return { store: false, reason: "db insert failed" };
-  }
+  // insert into local DB
+  const memoryRow = db.insertMemory({
+    user_id,
+    text,
+    embedding,
+    importance_score: cls.importance_score ?? 0,
+    pinned: false,
+    do_not_store_again: false,
+  });
 
   // insert into chroma
   try {

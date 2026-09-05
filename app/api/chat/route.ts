@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabaseClient";
+import { db } from "../../../memory-server/db.js";
 import { embedText } from "@/lib/embedding";
 import { chroma } from "@/lib/chroma";
 import { rankMemories } from "@/lib/ranking";
@@ -30,17 +30,13 @@ export async function POST(req: Request) {
       where: { user_id }
     });
 
-    // Extract Supabase memory IDs
+    // Extract memory IDs
     const memoryIds = chromaResults.metadatas?.[0]?.map((m: any) => m.memory_id) || [];
 
-    // 3️⃣ Fetch memory rows
+    // 3️⃣ Fetch memory rows from local DB
     let memories: any[] = [];
     if (memoryIds.length > 0) {
-      const { data } = await supabase
-        .from("memories")
-        .select("*")
-        .in("id", memoryIds);
-      memories = data || [];
+      memories = db.getMemoriesByIds(memoryIds);
     }
 
     // 4️⃣ Rank memories

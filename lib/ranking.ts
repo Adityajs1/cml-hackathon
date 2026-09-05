@@ -2,7 +2,7 @@
 export type MemoryRow = {
   id: number;
   text: string;
-  embedding: number[];            // stored as array in Supabase query result
+  embedding: number[];            // vector embedding array
   created_at: string | Date;
   updated_at?: string | Date;
   importance_score?: number;

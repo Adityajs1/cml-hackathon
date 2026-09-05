@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabaseClient";
+import { db } from "../../../memory-server/db.js";
 
 export async function GET() {
-  const { data, error } = await supabase.from("profiles").select("*").limit(1);
-  return NextResponse.json({ data, error });
+  const users = db.getUsers();
+  return NextResponse.json({ ok: true, status: "Local DB Online", totalUsers: users.length });
 }

@@ -5,9 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useState } from "react";
 import Link from "next/link";
-import { supabase } from "@/lib/supabaseClient";
+import { useRouter } from "next/navigation";
+import { authClient } from "@/lib/authClient";
 
 export default function SignupPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -19,17 +21,18 @@ export default function SignupPage() {
     setLoading(true);
     setMessage("");
 
-    const { data: _data, error } = await supabase.auth.signUp({
+    const { error } = await authClient.signUp({
       email,
       password,
-      options: {
-        data: { full_name: name },
-      },
+      name,
     });
-    void _data;
 
-    if (error) setMessage(error.message);
-    else setMessage("✅ Check your email for a confirmation link.");
+    if (error) {
+      setMessage(error.message);
+    } else {
+      setMessage("✅ Account created successfully!");
+      router.push("/chat");
+    }
     setLoading(false);
   };
 
