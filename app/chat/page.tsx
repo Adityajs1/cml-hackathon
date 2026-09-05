@@ -153,6 +153,11 @@ export default function ChatPage() {
 
       if (data.reply) {
         setMessages((prev) => [...prev, { role: "ai", content: data.reply }]);
+      } else if (data.error) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "ai", content: `⚠️ ${data.error}` },
+        ]);
       } else {
         setMessages((prev) => [
           ...prev,

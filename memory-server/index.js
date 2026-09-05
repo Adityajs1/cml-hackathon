@@ -194,6 +194,31 @@ app.get("/memories", async (req, res) => {
 // =======================================================
 // 💬 ROUTE 2: CHAT WITH MEMORY + LONG-TERM SUMMARIZATION
 // =======================================================
+async function safeEmbed(text) {
+  try {
+    const embedModel = genAI.getGenerativeModel({ model: "embedding-001" });
+    const res = await embedModel.embedContent(text);
+    return res.embedding.values;
+  } catch (err) {
+    console.warn("Embedding API warning:", err.message);
+    return new Array(768).fill(0);
+  }
+}
+
+async function safeGenerateText(prompt) {
+  try {
+    const chatModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const replyRes = await chatModel.generateContent(prompt);
+    return replyRes.response.text();
+  } catch (err) {
+    console.error("Chat generation error:", err.message);
+    if (err.message && err.message.includes("API key not valid")) {
+      return "⚠️ Invalid Gemini API key. Please update GOOGLE_API_KEY in your .env file with a valid key from https://aistudio.google.com/app/apikey.";
+    }
+    return `⚠️ AI service error: ${err.message || "Failed to generate response."}`;
+  }
+}
+
 app.post("/chat", async (req, res) => {
   try {
     const { userId, message, sessionId, sessionTitle, memoryEnabled = true } = req.body;
@@ -208,10 +233,9 @@ app.post("/chat", async (req, res) => {
 
     // Memory disabled mode (stateless)
     if (!memoryEnabled) {
-      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-      const replyRes = await model.generateContent(message);
+      const reply = await safeGenerateText(message);
       return res.json({
-        reply: replyRes.response.text(),
+        reply,
         sessionId: activeSession,
       });
     }
@@ -223,9 +247,7 @@ app.post("/chat", async (req, res) => {
     });
 
     // 1️⃣ Embed User Message
-    const embedModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
-    const embedRes = await embedModel.embedContent(message);
-    const userVector = embedRes.embedding.values;
+    const userVector = await safeEmbed(message);
 
     // 2️⃣ Retrieve session memory
     const sessionAll = await collection.get();
@@ -250,7 +272,7 @@ app.post("/chat", async (req, res) => {
 
     const profileLong = profileMetas
       .filter((m) => m?.type === "profile")
-      .map((m) => m.text) // Assuming profile memories store text directly
+      .map((m) => m.text)
       .join("\n");
 
     // 3️⃣ Build Prompt
@@ -274,11 +296,7 @@ AI:
 `;
 
     // 4️⃣ Generate AI Response
-    const chatModel = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
-    });
-    const replyRes = await chatModel.generateContent(prompt);
-    const reply = replyRes.response.text();
+    const reply = await safeGenerateText(prompt);
 
     // 5️⃣ Store User Message
     await collection.add({
@@ -289,8 +307,7 @@ AI:
     });
 
     // 6️⃣ Store AI Reply
-    const embedResAI = await embedModel.embedContent(reply);
-    const aiVector = embedResAI.embedding.values;
+    const aiVector = await safeEmbed(reply);
 
     await collection.add({
       ids: [uuid()],
@@ -303,10 +320,6 @@ AI:
     if (sessionDocs.length > 20) {
       const oldChats = sessionDocs.slice(0, -10).join("\n");
 
-      const summarizer = genAI.getGenerativeModel({
-        model: "gemini-2.0-flash",
-      });
-
       const summaryPrompt = `
 Summarize the following chat history into a concise long-term memory summary.
 Keep it factual and context-rich.
@@ -314,15 +327,13 @@ Keep it factual and context-rich.
 ${oldChats}
       `;
 
-      const summaryRes = await summarizer.generateContent(summaryPrompt);
-      const summary = summaryRes.response.text();
-
-      const summaryEmbed = await embedModel.embedContent(summary);
+      const summary = await safeGenerateText(summaryPrompt);
+      const summaryVector = await safeEmbed(summary);
 
       await collection.add({
         ids: [uuid()],
         documents: [summary],
-        embeddings: [summaryEmbed.embedding.values],
+        embeddings: [summaryVector],
         metadatas: [
           {
             role: "system",
@@ -341,7 +352,7 @@ ${oldChats}
     res.json({ reply, sessionId: activeSession });
   } catch (err) {
     console.error("SERVER ERROR:", err);
-    res.status(500).json({ error: "Server failure" });
+    res.status(500).json({ error: err.message || "Server failure" });
   }
 });
 
