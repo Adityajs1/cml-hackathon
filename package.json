@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "concurrently -k -n \"NEXT,EXPRESS\" -c \"cyan.bold,yellow.bold\" \"next dev\" \"node memory-server/index.js\"",
+    "dev:next": "next dev",
+    "dev:server": "node memory-server/index.js",
     "build": "next build --webpack",
     "test": "jest --detectOpenHandles --forceExit",
     "start": "next start",
@@ -42,6 +44,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-jest": "^30.2.0",
+    "concurrently": "^10.0.5",
     "eslint": "^9",
     "eslint-config-next": "16.0.1",
     "jest": "^30.2.0",
