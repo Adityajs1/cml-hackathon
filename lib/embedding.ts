@@ -1,6 +1,5 @@
 export async function embedText(text: string): Promise<number[]> {
   const apiKey = process.env.GOOGLE_API_KEY;
-
   if (!apiKey) {
     throw new Error("GOOGLE_API_KEY is missing in environment variables.");
   }

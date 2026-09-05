@@ -1,5 +1,8 @@
 export async function generateText(prompt: string): Promise<string> {
   const apiKey = process.env.GOOGLE_API_KEY;
+  if (!apiKey) {
+    throw new Error("GOOGLE_API_KEY is missing in environment variables.");
+  }
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateText?key=${apiKey}`,
