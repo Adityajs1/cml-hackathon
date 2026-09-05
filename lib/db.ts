@@ -1,133 +1,255 @@
+import pg from "pg";
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import crypto from "crypto";
 
-const DB_PATH = path.join(process.cwd(), "data", "neuron_local.json");
+const { Pool } = pg;
 
-export type UserRecord = {
-  id: string;
-  email: string;
-  password_hash: string;
-  full_name: string;
-  created_at: number;
-};
+const connectionString =
+  process.env.DATABASE_URL ||
+  process.env.POSTGRES_URL ||
+  "postgresql://postgres:postgres@localhost:5432/neuron_db";
 
-export type MemoryRecord = {
-  id: string;
-  user_id: string;
-  text: string;
-  embedding: number[];
-  importance_score: number;
-  pinned: boolean;
-  do_not_store_again: boolean;
-  created_at: number;
-};
+let pool: any = null;
+let usePostgres = false;
 
-export type SessionRecord = {
-  token: string;
-  user_id: string;
-  expires_at: number;
-};
+try {
+  pool = new Pool({
+    connectionString,
+    connectionTimeoutMillis: 3000,
+  });
+} catch (_e) {
+  console.log("⚠️ Could not create Postgres pool, using file storage fallback.");
+}
 
-type Schema = {
-  users: UserRecord[];
-  memories: MemoryRecord[];
-  sessions: SessionRecord[];
-};
+const FILE_DB_PATH = path.join(process.cwd(), "data", "neuron_db.json");
 
-function ensureDbFile(): Schema {
-  const dir = path.dirname(DB_PATH);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  if (!fs.existsSync(DB_PATH)) {
-    const initial: Schema = { users: [], memories: [], sessions: [] };
-    fs.writeFileSync(DB_PATH, JSON.stringify(initial, null, 2), "utf8");
+function ensureFileDb() {
+  const dir = path.dirname(FILE_DB_PATH);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(FILE_DB_PATH)) {
+    const initial = { users: [], memories: [], sessions: [] };
+    fs.writeFileSync(FILE_DB_PATH, JSON.stringify(initial, null, 2), "utf8");
     return initial;
   }
   try {
-    const content = fs.readFileSync(DB_PATH, "utf8");
-    return JSON.parse(content);
-  } catch (_err) {
-    const initial: Schema = { users: [], memories: [], sessions: [] };
-    fs.writeFileSync(DB_PATH, JSON.stringify(initial, null, 2), "utf8");
+    return JSON.parse(fs.readFileSync(FILE_DB_PATH, "utf8"));
+  } catch (_e) {
+    const initial = { users: [], memories: [], sessions: [] };
+    fs.writeFileSync(FILE_DB_PATH, JSON.stringify(initial, null, 2), "utf8");
     return initial;
   }
 }
 
-function saveDb(data: Schema) {
-  const dir = path.dirname(DB_PATH);
+function saveFileDb(data: any) {
+  const dir = path.dirname(FILE_DB_PATH);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const tmp = DB_PATH + ".tmp";
+  const tmp = FILE_DB_PATH + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
-  fs.renameSync(tmp, DB_PATH);
+  fs.renameSync(tmp, FILE_DB_PATH);
 }
 
+async function initPgTables() {
+  if (!pool) return false;
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id UUID PRIMARY KEY,
+          email VARCHAR(255) UNIQUE NOT NULL,
+          password_hash TEXT NOT NULL,
+          name VARCHAR(255),
+          created_at BIGINT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS sessions (
+          token TEXT PRIMARY KEY,
+          user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          expires_at BIGINT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS memories (
+          id UUID PRIMARY KEY,
+          user_id VARCHAR(255) NOT NULL,
+          text TEXT NOT NULL,
+          embedding JSONB,
+          importance_score REAL DEFAULT 0,
+          pinned BOOLEAN DEFAULT FALSE,
+          created_at BIGINT NOT NULL
+        );
+      `);
+      usePostgres = true;
+      return true;
+    } finally {
+      client.release();
+    }
+  } catch (_err) {
+    usePostgres = false;
+    return false;
+  }
+}
+
+initPgTables().catch(() => {});
+
 export function hashPassword(password: string): string {
-  const salt = "neuron_salt_2025";
+  const salt = "neuron_salt_express_2025";
   return crypto.scryptSync(password, salt, 64).toString("hex");
 }
 
 export const localDb = {
-  getUsers(): UserRecord[] {
-    return ensureDbFile().users;
+  async findUserByEmail(email: string) {
+    if (!email) return null;
+    const lowerEmail = email.toLowerCase();
+    if (usePostgres && pool) {
+      try {
+        const res = await pool.query("SELECT * FROM users WHERE LOWER(email) = $1", [lowerEmail]);
+        return res.rows[0] || null;
+      } catch (_e) {}
+    }
+    return ensureFileDb().users.find((u: any) => u.email.toLowerCase() === lowerEmail) || null;
   },
-  findUserByEmail(email: string): UserRecord | undefined {
-    return ensureDbFile().users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+
+  async findUserById(id: string) {
+    if (!id) return null;
+    if (usePostgres && pool) {
+      try {
+        const res = await pool.query("SELECT * FROM users WHERE id = $1", [id]);
+        return res.rows[0] || null;
+      } catch (_e) {}
+    }
+    return ensureFileDb().users.find((u: any) => u.id === id) || null;
   },
-  findUserById(id: string): UserRecord | undefined {
-    return ensureDbFile().users.find((u) => u.id === id);
-  },
-  createUser(user: Omit<UserRecord, "id" | "created_at">): UserRecord {
-    const db = ensureDbFile();
-    const newUser: UserRecord = {
-      ...user,
-      id: crypto.randomUUID(),
-      created_at: Date.now(),
+
+  async createUser({ email, password, name }: { email: string; password: string; name?: string }) {
+    const userId = crypto.randomUUID();
+    const passwordHash = hashPassword(password);
+    const userName = name || email.split("@")[0];
+    const createdAt = Date.now();
+
+    if (usePostgres && pool) {
+      try {
+        const res = await pool.query(
+          "INSERT INTO users (id, email, password_hash, name, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, name",
+          [userId, email.toLowerCase(), passwordHash, userName, createdAt]
+        );
+        return res.rows[0];
+      } catch (_e) {}
+    }
+
+    const currentDb = ensureFileDb();
+    const newUser = {
+      id: userId,
+      email: email.toLowerCase(),
+      password_hash: passwordHash,
+      name: userName,
+      created_at: createdAt,
     };
-    db.users.push(newUser);
-    saveDb(db);
-    return newUser;
+    currentDb.users.push(newUser);
+    saveFileDb(currentDb);
+    return { id: newUser.id, email: newUser.email, name: newUser.name };
   },
-  createSession(userId: string): SessionRecord {
-    const db = ensureDbFile();
+
+  async createSession(userId: string) {
     const token = crypto.randomBytes(32).toString("hex");
-    const session: SessionRecord = {
-      token,
-      user_id: userId,
-      expires_at: Date.now() + 30 * 24 * 60 * 60 * 1000,
-    };
-    db.sessions.push(session);
-    saveDb(db);
+    const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
+
+    if (usePostgres && pool) {
+      try {
+        await pool.query(
+          "INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)",
+          [token, userId, expiresAt]
+        );
+        return { token, user_id: userId, expires_at: expiresAt };
+      } catch (_e) {}
+    }
+
+    const currentDb = ensureFileDb();
+    const session = { token, user_id: userId, expires_at: expiresAt };
+    currentDb.sessions.push(session);
+    saveFileDb(currentDb);
     return session;
   },
-  getSession(token: string): SessionRecord | undefined {
-    const db = ensureDbFile();
-    const session = db.sessions.find((s) => s.token === token);
-    if (session && session.expires_at > Date.now()) {
-      return session;
+
+  async getSession(token: string) {
+    if (!token) return null;
+    if (usePostgres && pool) {
+      try {
+        const res = await pool.query(
+          "SELECT s.token, s.expires_at, u.id, u.email, u.name FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.token = $1",
+          [token]
+        );
+        const row = res.rows[0];
+        if (row && Number(row.expires_at) > Date.now()) {
+          return { token: row.token, user: { id: row.id, email: row.email, name: row.name } };
+        }
+        return null;
+      } catch (_e) {}
     }
-    return undefined;
+
+    const currentDb = ensureFileDb();
+    const session = currentDb.sessions.find((s: any) => s.token === token);
+    if (session && session.expires_at > Date.now()) {
+      const user = currentDb.users.find((u: any) => u.id === session.user_id);
+      if (user) {
+        return { token: session.token, user: { id: user.id, email: user.email, name: user.name } };
+      }
+    }
+    return null;
   },
-  deleteSession(token: string) {
-    const db = ensureDbFile();
-    db.sessions = db.sessions.filter((s) => s.token !== token);
-    saveDb(db);
+
+  async deleteSession(token: string) {
+    if (usePostgres && pool) {
+      try {
+        await pool.query("DELETE FROM sessions WHERE token = $1", [token]);
+        return;
+      } catch (_e) {}
+    }
+    const currentDb = ensureFileDb();
+    currentDb.sessions = currentDb.sessions.filter((s: any) => s.token !== token);
+    saveFileDb(currentDb);
   },
-  insertMemory(mem: Omit<MemoryRecord, "id" | "created_at">): MemoryRecord {
-    const db = ensureDbFile();
-    const newMem: MemoryRecord = {
-      ...mem,
-      id: crypto.randomUUID(),
-      created_at: Date.now(),
+
+  async insertMemory({ user_id, text, embedding = [], importance_score = 0, pinned = false }: any) {
+    const memoryId = crypto.randomUUID();
+    const createdAt = Date.now();
+
+    if (usePostgres && pool) {
+      try {
+        const res = await pool.query(
+          "INSERT INTO memories (id, user_id, text, embedding, importance_score, pinned, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
+          [memoryId, user_id, text, JSON.stringify(embedding), importance_score, pinned, createdAt]
+        );
+        return res.rows[0];
+      } catch (_e) {}
+    }
+
+    const currentDb = ensureFileDb();
+    const memoryRow = {
+      id: memoryId,
+      user_id,
+      text,
+      embedding,
+      importance_score,
+      pinned,
+      created_at: createdAt,
     };
-    db.memories.push(newMem);
-    saveDb(db);
-    return newMem;
+    currentDb.memories.push(memoryRow);
+    saveFileDb(currentDb);
+    return memoryRow;
   },
-  getMemoriesByIds(ids: string[]): MemoryRecord[] {
-    const db = ensureDbFile();
+
+  async getMemoriesByIds(ids: string[]) {
+    if (!ids || ids.length === 0) return [];
+    if (usePostgres && pool) {
+      try {
+        const res = await pool.query("SELECT * FROM memories WHERE id = ANY($1::uuid[])", [ids]);
+        return res.rows;
+      } catch (_e) {}
+    }
+
+    const currentDb = ensureFileDb();
     const set = new Set(ids);
-    return db.memories.filter((m) => set.has(m.id));
+    return currentDb.memories.filter((m: any) => set.has(m.id));
   },
 };

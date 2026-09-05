@@ -20,9 +20,9 @@ export const supabase = {
         return {
           select() {
             return {
-              single() {
+              async single() {
                 if (table === "memories") {
-                  const inserted = db.insertMemory({
+                  const inserted = await db.insertMemory({
                     user_id: row.user_id || "default_user",
                     text: row.text || "",
                     embedding: row.embedding || [],
@@ -39,14 +39,14 @@ export const supabase = {
       },
       select(_query?: string) {
         return {
-          in(field: string, ids: string[]) {
+          async in(field: string, ids: string[]) {
             if (table === "memories" && field === "id") {
-              const data = db.getMemoriesByIds(ids);
+              const data = await db.getMemoriesByIds(ids);
               return { data, error: null };
             }
             return { data: [], error: null };
           },
-          limit(_count: number) {
+          async limit(_count: number) {
             return { data: [], error: null };
           },
         };

@@ -20,20 +20,20 @@ app.use(
 app.use(express.json());
 
 // =======================================================
-// 🔐 ROUTE 0: EXPRESS LOCAL AUTHENTICATION
+// 🔐 ROUTE 0: EXPRESS LOCAL AUTHENTICATION (PostgreSQL / DB)
 // =======================================================
-app.post("/auth/signup", (req, res) => {
+app.post("/auth/signup", async (req, res) => {
   try {
     const { email, password, name } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password are required" });
     }
-    const existing = db.findUserByEmail(email);
+    const existing = await db.findUserByEmail(email);
     if (existing) {
       return res.status(400).json({ error: "An account with this email already exists" });
     }
-    const user = db.createUser({ email, password, name });
-    const session = db.createSession(user.id);
+    const user = await db.createUser({ email, password, name });
+    const session = await db.createSession(user.id);
     res.json({ ok: true, user, token: session.token });
   } catch (err) {
     console.error("Signup error:", err);
@@ -41,17 +41,17 @@ app.post("/auth/signup", (req, res) => {
   }
 });
 
-app.post("/auth/login", (req, res) => {
+app.post("/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password are required" });
     }
-    const user = db.findUserByEmail(email);
+    const user = await db.findUserByEmail(email);
     if (!user || user.password_hash !== hashPassword(password)) {
       return res.status(400).json({ error: "Invalid email or password" });
     }
-    const session = db.createSession(user.id);
+    const session = await db.createSession(user.id);
     const userObj = { id: user.id, email: user.email, name: user.name };
     res.json({ ok: true, user: userObj, token: session.token });
   } catch (err) {
@@ -60,14 +60,14 @@ app.post("/auth/login", (req, res) => {
   }
 });
 
-app.get("/auth/me", (req, res) => {
+app.get("/auth/me", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader ? authHeader.replace("Bearer ", "") : req.query.token;
     if (!token) {
       return res.status(401).json({ error: "Not authenticated" });
     }
-    const session = db.getSession(token);
+    const session = await db.getSession(token);
     if (!session) {
       return res.status(401).json({ error: "Session expired or invalid" });
     }
@@ -78,11 +78,11 @@ app.get("/auth/me", (req, res) => {
   }
 });
 
-app.post("/auth/logout", (req, res) => {
+app.post("/auth/logout", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader ? authHeader.replace("Bearer ", "") : req.body.token;
-    if (token) db.deleteSession(token);
+    if (token) await db.deleteSession(token);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: "Logout failed" });
