@@ -21,11 +21,11 @@ app.use(express.json());
 // --------------------
 // Initialize Gemini + Chroma
 // --------------------
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "");
 const chroma = new CloudClient({
   apiKey: process.env.CHROMA_API_KEY,
   tenant: process.env.CHROMA_TENANT,
-  database: process.env.CHROMA_DATABASE,
+  database: process.env.CHROMA_DATABASE
 });
 
 async function getProfileCollection(userId) {
@@ -529,6 +529,75 @@ app.post("/memory/profile", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to save profile memory" });
+  }
+});
+
+// =======================================================
+// 🗑️ ROUTE 8: DELETE A SPECIFIC MEMORY ENTRY (POST)
+// =======================================================
+app.post("/memory/delete", async (req, res) => {
+  try {
+    const { userId, sessionId = "default-session", id } = req.body;
+    if (!id) {
+      return res.status(400).json({ error: "Missing required field (id)" });
+    }
+
+    const collection = await chroma.getOrCreateCollection({
+      name: `memory_${userId}_${sessionId}`,
+    });
+
+    await collection.delete({ ids: [id] });
+
+    console.log(`🗑️ Deleted memory ${id} for user ${userId} (${sessionId})`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Error deleting memory:", err);
+    res.status(500).json({ error: "Failed to delete memory" });
+  }
+});
+
+// =======================================================
+// ✍️ ROUTE 9: EDIT A SPECIFIC MEMORY ENTRY (POST)
+// =======================================================
+app.post("/memory/edit", async (req, res) => {
+  try {
+    const { userId, sessionId = "default-session", id, newDocument } = req.body;
+    if (!id || !newDocument) {
+      return res.status(400).json({ error: "Missing required fields (id, newDocument)" });
+    }
+
+    const collection = await chroma.getOrCreateCollection({
+      name: `memory_${userId}_${sessionId}`,
+    });
+
+    // 1️⃣ Embed new text
+    const embedModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
+    const emb = (await embedModel.embedContent(newDocument)).embedding.values;
+
+    // 2️⃣ Fetch existing metadata to preserve it
+    const got = await collection.get({ ids: [id] });
+    const existingMeta = got.metadatas?.[0] || {};
+    
+    // Update the summaryText in metadata if it was a summary
+    const newMetadata = { ...existingMeta };
+    if (existingMeta.type === "summary") {
+      newMetadata.summaryText = newDocument;
+    }
+    newMetadata.ts = Date.now(); // update timestamp
+
+    // 3️⃣ Update in Chroma
+    await collection.update({
+      ids: [id],
+      documents: [newDocument],
+      embeddings: [emb],
+      metadatas: [newMetadata],
+    });
+
+    console.log(`✍️ Edited memory ${id} for user ${userId} (${sessionId})`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Error editing memory:", err);
+    res.status(500).json({ error: "Failed to edit memory" });
   }
 });
 

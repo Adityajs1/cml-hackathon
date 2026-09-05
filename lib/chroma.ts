@@ -1,5 +1,7 @@
-import { ChromaClient } from "chromadb";
+import { CloudClient } from "chromadb";
 
-export const chroma = new ChromaClient({
-  path: process.env.CHROMA_URL || "http://localhost:8000",
+export const chroma = new CloudClient({
+  apiKey: process.env.CHROMA_API_KEY,
+  tenant: process.env.CHROMA_TENANT,
+  database: process.env.CHROMA_DATABASE
 });
