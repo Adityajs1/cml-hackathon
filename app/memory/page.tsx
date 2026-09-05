@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -48,16 +48,16 @@ export default function MemoryDashboard() {
   // --------------------------
   // Fetch Sessions
   // --------------------------
-  const fetchSessions = async () => {
+  const fetchSessions = useCallback(async () => {
     const res = await fetch(`http://localhost:5050/sessions?userId=${USER_ID}`);
     const data = await res.json();
     setSessions(data.length ? data : ["default-session"]);
-  };
+  }, []);
 
   // --------------------------
   // Fetch Memories
   // --------------------------
-  const fetchMemories = async () => {
+  const fetchMemories = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch(
@@ -70,15 +70,15 @@ export default function MemoryDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [sessionId]);
 
   useEffect(() => {
     fetchSessions();
-  }, []);
+  }, [fetchSessions]);
 
   useEffect(() => {
     fetchMemories();
-  }, [sessionId]);
+  }, [fetchMemories]);
 
   // -------------------------
   // Filtering
@@ -92,6 +92,13 @@ export default function MemoryDashboard() {
       return true;
     });
   }, [memories, filter]);
+
+  const displayedItems = useMemo(() => {
+    if (search.trim() && isSearching) {
+      return searchResults;
+    }
+    return filtered;
+  }, [filtered, search, searchResults, isSearching]);
 
   // -------------------------
   // Context Modal
@@ -315,11 +322,11 @@ export default function MemoryDashboard() {
         <ScrollArea className="h-[60vh] rounded-lg border border-[#1e2b4a] p-4">
           {loading ? (
             <p className="text-blue-300/70">Loading memories...</p>
-          ) : filtered.length === 0 ? (
+          ) : displayedItems.length === 0 ? (
             <p className="text-blue-300/70">No memories found.</p>
           ) : (
             <Timeline
-              items={filtered}
+              items={displayedItems}
               onShowContext={handleShowContext}
               onRewrite={handleRewrite}
               onDelete={handleDelete}
@@ -341,6 +348,12 @@ export default function MemoryDashboard() {
                   ✕
                 </button>
               </div>
+
+              {contextFor && (
+                <div className="mb-4 p-3 bg-[#0e1a2c] border border-[#1e2b4a] rounded text-blue-100 text-sm italic">
+                  &quot;{contextFor.document}&quot;
+                </div>
+              )}
 
               <p className="text-sm text-blue-300/70 mb-3">
                 Matching snippets (semantic search).
